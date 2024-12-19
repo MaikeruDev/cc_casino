@@ -1,0 +1,363 @@
+sleep(1)
+
+local monitor = peripheral.find("monitor")
+local chest = peripheral.wrap("sophisticatedstorage:barrel_5") //Define your Chest name here for the input/deposit chest
+local output = peripheral.wrap("sophisticatedstorage:barrel_2") //Define your Chest name here for outputting/cashout items
+
+local apiUrl = "http://<API_IP>:3000/balance/"
+
+local validItems = { //Define your items that are going to be tradable and their chests
+    ["minecraft:emerald"] = { name = "Emerald", value = 10, color = "lime", storage = "functionalstorage:spruce_1_2" },
+    ["minecraft:diamond"] = { name = "Diamond", value = 5, color = "blue", storage = "functionalstorage:spruce_1_3" },
+    ["minecraft:netherite_ingot"] = { name = "Netherite", value = 20, color = "purple", storage = "functionalstorage:spruce_1_7" },
+    ["allthemodium:allthemodium_nugget"] = { name = "ATMNugget", value = 50, color = "yellow", storage = "functionalstorage:spruce_1_8" },
+}
+
+local function clearAndWrite(text, y)
+    monitor.clear()
+    monitor.setCursorPos(1, y or 1)
+    monitor.write(text)
+end
+
+local function getBalance(username)
+    local response = http.get(apiUrl .. username)
+    if response then
+        local data = response.readAll()
+        response.close()
+        local result = textutils.unserializeJSON(data)
+        return result and result.coins or 0
+    end
+    return 0
+end
+
+local function updateBalance(username, newBalance)
+    local body = textutils.serializeJSON({ coins = newBalance })
+    http.post(apiUrl .. username, body, { ["Content-Type"] = "application/json"})
+end
+
+local function displayValidItems()
+    monitor.clear()
+    monitor.setCursorPos(1,2)
+    term.redirect(monitor)
+    term.setTextColor(colors.white)
+    
+    monitor.write("Valid Items to Deposit:")
+    local y = 4
+    
+    for id, data in pairs(validItems) do
+
+        if data.color == "blue" then
+            term.setTextColor(colors.blue) 
+        elseif data.color == "lime" then
+            term.setTextColor(colors.lime) 
+        elseif data.color == "yellow" then
+            term.setTextColor(colors.yellow)
+        end
+            
+        monitor.setCursorPos(1,y)
+        print(data.name .. " - " .. data.value .. " coins")
+        y = y + 1
+    end
+
+    term.setTextColor(colors.white)    
+    monitor.setCursorPos(1, y + 1)
+    print("Place items into the chest and click 'Next'")
+
+end
+
+local function calculateItems()
+    local totalValue = 0
+    local items = chest.list()
+    local itemCounts = {}
+    
+    for slot, item in pairs(items) do
+        if validItems[item.name] then
+            local value = validItems[item.name].value * item.count
+            totalValue = totalValue + value
+            itemCounts[item.name] = (itemCounts[item.name] or 0) + item.count
+        end
+    end
+    
+    return totalValue, itemCounts
+end
+
+local function depositItems(playerName)
+    displayValidItems()
+    monitor.setCursorPos(1,10)
+    monitor.write("[Next]")
+    
+    os.pullEvent("monitor_touch")
+    
+    local totalValue, itemCounts = calculateItems()
+    
+    monitor.clear()
+    monitor.setCursorPos(16,2)
+    monitor.write("Total Coin Value: " .. totalValue)
+    monitor.setCursorPos(17,4)
+    monitor.write("Items to Convert:")
+    local y = 6
+    for item, count in pairs(itemCounts) do
+        monitor.setCursorPos(20,y)
+        monitor.write(validItems[item].name .. " x" .. count)
+        y = y + 1
+    end
+    
+    monitor.setCursorPos(17, y + 2)
+    monitor.write("Confirm | Cancel")
+    
+    while true do
+        local _, _, x, clickedY = os.pullEvent("monitor_touch")
+       
+        if clickedY == y + 2 and x >= 26 and x <=32 then
+            monitor.setCursorPos(1, y + 4)
+            monitor.write("Transaction Cancelled")
+            sleep(2)
+            return
+        elseif clickedY == y + 2 and x >= 11 and x <= 24 then
+            local totalValue, itemCounts = calculateItems()
+
+            for itemName, count in pairs(itemCounts) do
+                local itemData = validItems[itemName]
+                if itemData then
+                    local storage = peripheral.wrap(itemData.storage)
+                    local remaining = count
+        
+                    for slot, item in pairs(chest.list()) do
+                        if item.name == itemName then
+                            local moved = chest.pushItems(itemData.storage, slot, math.min(item.count, remaining))
+                            remaining = remaining - moved
+                            if remaining <= 0 then break end
+                        end
+                    end
+                end
+            end
+        
+            local balance = getBalance(playerName)
+            updateBalance(playerName, balance + totalValue)
+        
+            monitor.clear()
+            monitor.setCursorPos(16, 2)
+            monitor.write("Deposited " .. totalValue .. " coins!")
+            sleep(2)     
+            return
+        end
+    end
+end
+
+local function showHomeScreen()
+    monitor.setTextScale(1)
+    monitor.clear()
+    monitor.setCursorPos(12,8)
+    monitor.write("--- Casino Coin Machine ---")
+    monitor.setCursorPos(15,10)
+    monitor.write("Right-click the green")
+    monitor.setCursorPos(18,11)
+    monitor.write("block to start!")
+end
+
+local function interactiveNumberSelection(playerName)
+    local amount = 1
+    while true do
+        monitor.clear()
+        monitor.setCursorPos(1,2)
+        monitor.write("Set Amount: " .. amount)
+        
+        monitor.setCursorPos(1,4) monitor.write("[-100] [-10] [-1]")
+        monitor.setCursorPos(19,4) monitor.write("[+1] [+10] [+100]")
+        monitor.setCursorPos(1,6) monitor.write("Confirm | Cancel")
+        
+        local balance = getBalance(playerName)
+        monitor.setCursorPos(1,8)
+        monitor.write("Your Balance: " .. balance .. " coins")
+        
+        local event, side, x, y = os.pullEvent("monitor_touch")
+        if y == 4 then
+            if x >= 1 and x <= 6 then amount = math.max(0, amount - 100)
+            elseif x >= 8 and x <= 13 then amount = math.max(0, amount - 10)
+            elseif x >= 14 and x <= 17 then amount = math.max(0, amount - 1)
+            elseif x >= 18 and x <= 22 then amount = amount + 1
+            elseif x >= 23 and x <= 28 then amount = amount + 10
+            elseif x >= 29 and x <= 35 then amount = amount + 100
+            end
+        elseif y == 6 then
+            if x <= 9 then
+                return amount
+            elseif x >= 11 and x <= 25 then
+                return nil
+            end
+        end
+    end
+end    
+
+local function playerMenu(playerName)
+    clearAndWrite("Player: " .. playerName, 2)
+    monitor.setCursorPos(17,4)
+    local balance = getBalance(playerName)
+    monitor.write("Balance: " .. balance .. " coins")
+    monitor.setCursorPos(18,6)
+    monitor.write("1. Deposit Coins")
+    monitor.setCursorPos(18,7)
+    monitor.write("2. Withdraw Coins")
+    monitor.setCursorPos(18,8)
+    monitor.write("3.    Exit    ")
+    monitor.setCursorPos(12,9)
+    monitor.write("Touch a screen item to choose.")
+    
+    while true do
+        local event, side, x, y = os.pullEvent("monitor_touch")
+        if y == 6 then
+            return "deposit"
+        elseif y == 7 then
+            return "withdraw"
+        elseif y == 8 then
+            return "exit"
+        else
+            monitor.setCursorPos(1,10)
+            monitor.write("Invalid choice. Try again.")
+        end
+    end
+end
+
+local function handleDeposit(playerName) -- old
+    clearAndWrite("How many coins to deposit?", 2)
+    local amount = interactiveNumberSelection(playerName)
+    
+    if amount and amount > 0 then
+        local balance = getBalance(playerName)
+        updateBalance(playerName, balance + amount)
+        clearAndWrite("Deposited " .. amount .. " coins!", 4)
+    else
+        clearAndWrite("Invalid amount. Returning to home...", 4)
+    end
+    sleep(2)
+end
+
+local function handleCashout(playerName)
+    local balance = getBalance(playerName)
+    if balance <= 0 then
+        monitor.clear()
+        monitor.setCursorPos(1, 2)
+        monitor.write("You have no points to cash out!")
+        sleep(2)
+        return
+    end
+
+    local cashoutSelections = {}
+    for id, data in pairs(validItems) do
+        cashoutSelections[id] = 0
+    end
+
+    local function displayCashoutMenu()
+        monitor.clear()
+        monitor.setCursorPos(13, 2)
+        monitor.write("Your Balance: " .. balance .. " Points")
+
+        local y = 4
+        for id, data in pairs(validItems) do
+            monitor.setCursorPos(5, y)
+            monitor.write(string.format("%s [%d Points] - %d", data.name, data.value, cashoutSelections[id]))
+            monitor.setCursorPos(5, y + 1)
+            monitor.write("[-100] [-10] [-1] [+1] [+10] [+100]")
+            y = y + 3
+        end
+
+        monitor.setCursorPos(5, y + 1)
+        monitor.write("Total Points Cashout: " .. balance .. " Points")
+        monitor.setCursorPos(5, y + 3)
+        monitor.write("Confirm | Cancel")
+    end
+
+    local lastEvent = nil  -- Track the last processed event
+
+    while true do
+        displayCashoutMenu()
+        local event, side, x, y = os.pullEvent("monitor_touch")
+
+        if lastEvent and os.clock() - lastEvent < 0.2 then
+            -- Skip this event if it happened too soon after the previous one
+            goto continue
+        end
+
+        lastEvent = os.clock()  -- Set the last event time
+
+        local currentY = 4
+        for id, data in pairs(validItems) do
+            if y == currentY + 1 then
+                if x >= 6 and x <= 11 then cashoutSelections[id] = math.max(0, cashoutSelections[id] - 100)
+                elseif x >= 13 and x <= 17 then cashoutSelections[id] = math.max(0, cashoutSelections[id] - 10)
+                elseif x >= 19 and x <= 21 then cashoutSelections[id] = math.max(0, cashoutSelections[id] - 1)
+                elseif x >= 23 and x <= 25 then cashoutSelections[id] = cashoutSelections[id] + 1
+                elseif x >= 27 and x <= 31 then cashoutSelections[id] = cashoutSelections[id] + 10
+                elseif x >= 32 and x <= 38 then cashoutSelections[id] = cashoutSelections[id] + 100
+                end
+            end
+            currentY = currentY + 3
+        end
+
+        if y == currentY + 3 then
+            if x >= 6 and x <= 13 then
+                break -- Confirm
+            elseif x >= 15 and x <= 22 then
+                return -- Cancel
+            end
+        end
+        ::continue::
+    end
+
+    local totalPoints = 0
+    for id, data in pairs(validItems) do
+        totalPoints = totalPoints + (cashoutSelections[id] * data.value)
+    end
+
+    if totalPoints > balance then
+        monitor.clear()
+        monitor.setCursorPos(1, 2)
+        monitor.write("Not enough points for this cashout!")
+        sleep(2)
+        return
+    end
+
+    for id, count in pairs(cashoutSelections) do
+        if count > 0 then
+            local storage = peripheral.wrap(validItems[id].storage)
+            local remaining = count
+            for slot, item in pairs(storage.list()) do
+                if item.name == id then
+                    local moved = storage.pushItems("sophisticatedstorage:barrel_2", slot, math.min(item.count, remaining))
+                    remaining = remaining - moved
+                    if remaining <= 0 then break end
+                end
+            end
+        end
+    end
+
+    updateBalance(playerName, balance - totalPoints)
+
+    monitor.clear()
+    monitor.setCursorPos(18, 2)
+    monitor.write("Cashout Successful!")
+    monitor.setCursorPos(14, 4)
+    monitor.write("New Balance: " .. (balance - totalPoints) .. " Points")
+    monitor.setCursorPos(9, 6)
+    monitor.write("Collect items from the output chest.")
+    sleep(3)
+end
+
+while true do
+    showHomeScreen()
+    
+    local event, username, device = os.pullEvent("playerClick") 
+    
+    while true do
+    local choice = playerMenu(username)
+    if choice == "deposit" then
+        depositItems(username)
+    elseif choice == "withdraw" then
+        handleCashout(username)
+    elseif choice == "exit" then
+        monitor.clear()
+        monitor.setCursorPos(1,2)
+        break
+    end
+    end
+end

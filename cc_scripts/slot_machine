@@ -1,0 +1,394 @@
+sleep(2)
+
+-- Peripheral Setup / Make sure to adjust your peripheral names
+local monitor = peripheral.wrap("monitor_29") -- Main game monitor
+local actionMonitor = peripheral.wrap("monitor_27") -- Play/Exit monitor
+local bidMonitor = peripheral.wrap("monitor_28") -- Higher/Lower monitor
+local playerDetector = peripheral.find("playerDetector") -- Player Detector
+local speaker = peripheral.wrap("left") -- Speaker for sounds
+
+-- API URL
+local API_URL = "http://<API_IP>:3000/balance/"
+
+-- Constants
+local spinDelays = {1, 1.5, 2} -- Sequential spin delays
+local WIN_DELAY = 2
+local BET_INCREMENT = 20
+local MAX_BET = 400
+local MIN_BET = 20
+
+-- Mob Faces 
+local mobFaces = {
+    Pig = {
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink},
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink},
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink},
+        {colors.black, colors.white, colors.pink, colors.pink, colors.pink, colors.pink, colors.white, colors.black},
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink},
+        {colors.pink, colors.pink, colors.magenta, colors.pink, colors.pink, colors.magenta, colors.pink, colors.pink},
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink},
+        {colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink, colors.pink}
+    },
+    Creeper = {
+        {colors.green, colors.green, colors.green, colors.green, colors.green, colors.green, colors.green, colors.green},
+	    {colors.green, colors.green, colors.green, colors.green, colors.green, colors.green, colors.green, colors.green},
+	    {colors.green, colors.black, colors.black, colors.green, colors.green, colors.black, colors.black, colors.green},
+	    {colors.green, colors.black, colors.black, colors.green, colors.green, colors.black, colors.black, colors.green},
+    	{colors.green, colors.green, colors.green, colors.black, colors.black, colors.green, colors.green, colors.green},
+    	{colors.green, colors.green, colors.black, colors.black, colors.black, colors.black, colors.green, colors.green},
+    	{colors.green, colors.green, colors.black, colors.black, colors.black, colors.black, colors.green, colors.green},
+    	{colors.green, colors.green, colors.black, colors.black, colors.black, colors.black, colors.green, colors.green}
+    },
+    Steve = {
+        {colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown},
+        {colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown, colors.brown},
+        {colors.brown, colors.orange, colors.orange, colors.orange, colors.orange, colors.orange, colors.orange, colors.brown},
+        {colors.orange, colors.orange, colors.orange, colors.orange, colors.orange, colors.orange, colors.orange, colors.orange},
+        {colors.orange, colors.white, colors.blue, colors.orange, colors.orange, colors.blue, colors.white, colors.orange},
+        {colors.orange, colors.orange, colors.orange, colors.brown, colors.brown, colors.orange, colors.orange, colors.orange},
+        {colors.orange, colors.orange, colors.brown, colors.pink, colors.pink, colors.brown, colors.orange, colors.orange},
+        {colors.orange, colors.orange, colors.brown, colors.brown, colors.brown, colors.brown, colors.orange, colors.orange}
+    },
+    Skeleton = {
+        {colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white},
+    	{colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white},
+    	{colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white},
+    	{colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white},
+    	{colors.white, colors.gray, colors.gray, colors.white, colors.white, colors.gray, colors.gray, colors.white},
+    	{colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white},
+    	{colors.white, colors.gray, colors.gray, colors.gray, colors.gray, colors.gray, colors.gray, colors.white},
+    	{colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white, colors.white}
+    },
+    Zombie = {
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.black, colors.black, colors.lime, colors.lime, colors.black, colors.black, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.green, colors.green, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime},
+        {colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime, colors.lime}
+    },
+    Enderman = {
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.magenta, colors.purple, colors.magenta, colors.black, colors.black, colors.magenta, colors.purple, colors.magenta},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black},
+        {colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black, colors.black}
+    }
+}
+ 
+-- Split Monitor Rendering
+local function splitMonitor(monitor, leftText, rightText)
+    local width, height = monitor.getSize()
+    local midX = math.floor(width / 2)
+
+    monitor.clear()
+ 
+    for y = 1, height do
+        monitor.setCursorPos(midX, y)
+        monitor.write("|")
+    end
+ 
+    monitor.setCursorPos(2, math.floor(height / 2)) -- Left side
+    monitor.write(leftText)
+    monitor.setCursorPos(midX + 2, math.floor(height / 2)) -- Right side
+    monitor.write(rightText)
+end
+
+local function waitForMonitorClick(gameStarted)
+    while true do
+        local event, side, x, y = os.pullEvent("monitor_touch")
+ 
+        if side == peripheral.getName(actionMonitor) then
+            local width, height = actionMonitor.getSize()
+            local midX = math.floor(width / 2)
+            if x <= midX then
+                return gameStarted and "quit" or "exit"
+            else
+                return gameStarted and "spin" or "play"
+            end
+ 
+        elseif side == peripheral.getName(bidMonitor) then
+            local width, height = bidMonitor.getSize()
+            local midX = math.floor(width / 2)
+            if x <= midX then
+                return "higherBid"
+            else
+                return "lowerBid"
+            end
+        end
+    end
+end
+ 
+local function renderMonitors(state)
+    monitor.clear()
+    if state == "welcome" then
+        splitMonitor(actionMonitor, "Exit", "Play")
+        bidMonitor.clear()
+    elseif state == "betting" then
+        splitMonitor(actionMonitor, "Exit", "Play")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    elseif state == "game" then
+        splitMonitor(actionMonitor, "Quit", "Spin")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    end
+end
+
+-- Game state
+local currentPlayer = nil
+local currentBet = MIN_BET
+
+-- Helper Functions
+local function getPlayerBalance(playerName)
+    local response = http.get(API_URL .. playerName)
+    if response then
+        local data = response.readAll()
+        response.close()
+        local result = textutils.unserializeJSON(data)
+        return result and result.coins or 0
+    end
+    return 0
+end
+
+local function updatePlayerBalance(playerName, newBalance)
+    local body = textutils.serializeJSON({ coins = newBalance }) 
+    http.post(API_URL .. playerName, body, { ["Content-Type"] = "application/json" })
+end
+
+local function weightedRandom()
+    local weights = {
+        -- YOU CAN CHANGE THE WEIGHTING OF EACH FACE HERE
+        {"Pig", 40}, {"Creeper", 25}, {"Skeleton", 15},
+        {"Zombie", 15}, {"Enderman", 5}, {"Steve", 30} 
+    }
+    local total = 0
+    for _, w in pairs(weights) do total = total + w[2] end
+    local roll = math.random(total)
+    for _, face in pairs(weights) do
+        roll = roll - face[2]
+        if roll <= 0 then  
+            return face[1]
+        end
+    end
+    return nil 
+end
+
+local function drawFace(x, y, face)
+    local pixels = mobFaces[face]
+    if not pixels then
+        print("ERROR: Invalid face '" .. tostring(face) .. "'.")
+        return
+    end
+
+    term.redirect(monitor) 
+    for row = 1, #pixels do
+        for col = 1, #pixels[row] do
+            local color = pixels[row][col] or colors.black 
+            monitor.setBackgroundColor(color)
+            monitor.setCursorPos(x + col - 1, y + row - 1)
+            write(" ")
+        end
+    end
+    monitor.setBackgroundColor(colors.black) 
+end
+
+
+local function spinReels()
+    local reels = {"", "", ""} -- Initialize reels
+    local monitorWidth, monitorHeight = monitor.getSize()
+    local centerY = math.floor((monitorHeight - 8) / 2) 
+    local reelXOffsets = {10, 22, 34}  
+
+    term.redirect(monitor) 
+
+    for i = 1, 3 do
+        local startTime = os.clock()
+        while os.clock() - startTime < spinDelays[i] do
+            reels[i] = weightedRandom() 
+            monitor.clear() 
+
+            -- Draw the current state of the reels
+            for j = 1, i do
+                drawFace(reelXOffsets[j], centerY, reels[j])
+            end
+
+            -- Display spinning feedback
+            monitor.setCursorPos(1, monitorHeight - 1)
+            monitor.clearLine() 
+
+            -- Play spinning sound
+            speaker.playSound("minecraft:block.note_block.hat")
+            sleep(0.1) -- Smooth animation
+        end
+
+        speaker.playSound("minecraft:block.note_block.bass")
+        sleep(1)
+    end
+ 
+    return reels
+end
+
+-- YOU CAN CHANGE THE WINNINGS HERE
+local faceMultipliers = {
+    Pig = 1.5,      
+    Steve = 2.5,     
+    Zombie = 3,   
+    Skeleton = 3.5, 
+    Creeper = 5,  
+    Enderman = 10 
+}
+
+local function calculateWinnings(reels)
+    local counts = {}
+    for _, face in ipairs(reels) do
+        counts[face] = (counts[face] or 0) + 1
+    end
+
+    for face, count in pairs(counts) do
+        local multiplier = faceMultipliers[face] or 1 
+        if count == 3 then 
+            return currentBet * 1.5 * multiplier, face .. " Jackpot!" 
+        end
+        if count == 2 then 
+            return currentBet * 0.5 * multiplier, face .. " Pair!" 
+        end
+    end
+
+    return 0, "No win. Try again!"
+end
+
+local function displayCenteredMenuText(lines)
+    local width, height = monitor.getSize()
+    local centerX = math.floor(width / 2)
+    local centerY = math.floor(height / 2)
+
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
+    monitor.setTextColor(colors.white)
+
+    for i, line in ipairs(lines) do
+        monitor.setCursorPos(centerX - math.floor(string.len(line) / 2), centerY - #lines / 2 + i - 1)
+        monitor.write(line)
+    end
+end
+
+local function renderMonitors(state)
+    if state == "welcome" then
+        actionMonitor.clear()
+        bidMonitor.clear()
+    elseif state == "betting" then
+        splitMonitor(actionMonitor, "Exit", "Play")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    elseif state == "game" then
+        splitMonitor(actionMonitor, "Exit", "Spin")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    end
+end
+
+local function displayResults(reels, message, winnings)
+    local monitorWidth, monitorHeight = monitor.getSize()
+    local centerY = math.floor((monitorHeight - 8) / 2) 
+    local reelXOffsets = {10, 22, 34} 
+
+    term.redirect(monitor) 
+
+    for i = 1, 3 do
+        drawFace(reelXOffsets[i], centerY, reels[i])
+    end
+
+    local resultY = centerY + 10
+    local centerX = math.floor((monitorWidth - #message) / 2)
+
+    monitor.setCursorPos(centerX, resultY)
+    monitor.setTextColor(colors.orange)
+    monitor.write(message)
+
+    local winningsY = resultY + 2
+    monitor.setCursorPos(centerX, winningsY)
+    monitor.write("Winnings: " .. winnings .. " coins")
+
+    monitor.setTextColor(colors.white) 
+end
+
+local function canPlayerPlay(playerName, betAmount)
+    local balance = getPlayerBalance(playerName)
+    if balance < betAmount then
+        return false, "Insufficient balance! You need at least " .. betAmount .. " coins to play."
+    end
+    return true
+end
+
+-- Main Game Loop
+while true do
+    renderMonitors("welcome") 
+    monitor.clear()
+    monitor.setCursorPos(1, 1)
+    monitor.clear()
+    displayCenteredMenuText({
+        "Welcome to the Slot Machine!",
+        "Right-click the Green Block to login."
+    }) 
+
+    local _, username = os.pullEvent("playerClick")
+    currentPlayer = username
+    local playerBalance = getPlayerBalance(username)
+
+    renderMonitors("betting") 
+    speaker.playSound("minecraft:block.note_block.bell")
+
+    while true do
+        monitor.clear()
+        monitor.setCursorPos(1, 1) 
+
+        monitor.clear()
+        displayCenteredMenuText({
+            "Player: " .. currentPlayer,
+            "Balance: " .. playerBalance .. " coins",
+            "Bet: " .. currentBet .. " coins",
+            "Adjust bet with Higher/Lower.",
+            "",
+            "Press Play to spin or Exit to quit."
+        }) 
+
+        local action = waitForMonitorClick(false)
+        if action == "higherBid" then
+            currentBet = math.min(currentBet + BET_INCREMENT, MAX_BET)
+            speaker.playSound("minecraft:block.note_block.snare")
+        elseif action == "lowerBid" then
+            currentBet = math.max(currentBet - BET_INCREMENT, MIN_BET)
+            speaker.playSound("minecraft:block.note_block.snare")
+        elseif action == "play" then
+
+            local canPlay, errorMessage = canPlayerPlay(currentPlayer, currentBet)
+            if not canPlay then
+
+                displayCenteredMenuText({
+                    errorMessage,
+                    "",
+                    "Adjust your bet or exit to the main menu."
+                })
+                speaker.playSound("minecraft:block.note_block.bass")
+                sleep(2) 
+            else
+
+                renderMonitors("game") 
+                updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) - currentBet)
+                local reels = spinReels()
+                local winnings, message = calculateWinnings(reels)
+                displayResults(reels, message, winnings)
+                playerBalance = getPlayerBalance(currentPlayer) + winnings
+                updatePlayerBalance(currentPlayer, playerBalance)
+                sleep(WIN_DELAY)
+                renderMonitors("betting") 
+            end
+        
+        elseif action == "exit" then
+            speaker.playSound("minecraft:block.note_block.bass")
+            break
+        end
+    end
+end

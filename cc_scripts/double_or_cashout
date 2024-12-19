@@ -1,0 +1,309 @@
+sleep(2)
+
+-- Peripheral Setup / Make sure to adjust peripheral names
+local monitor = peripheral.wrap("monitor_20") -- Main game monitor
+local actionMonitor = peripheral.wrap("monitor_18") -- Action monitor (Double/Quit)
+local bidMonitor = peripheral.wrap("monitor_19") -- Higher/Lower bet monitor
+local playerDetector = peripheral.find("playerDetector") -- Player Detector peripheral
+local speaker = peripheral.wrap("left") -- Speaker for sound effects
+
+-- API URL
+local API_URL = "http://<API_IP>:3000/balance/"
+
+-- Constants
+local multipliers = {2, 4, 8, 16, 32, 64, 128, 256} -- Whole number multipliers
+local WIN_DELAY = 1.5
+local RISK_CHANCE = 60 -- 60% chance to win
+local BET_INCREMENT = 10 -- Bet increment for higher/lower
+local MAX_BET = 50 -- Maximum bet allowed
+local MIN_BET = 10 -- Minimum bet allowed
+
+-- Visual Settings
+local squareSize = 4
+local squareSpacing = 2
+local COLORS = {
+    empty = colors.gray,
+    filled = colors.green,
+    losing = colors.red,
+    blinking = colors.yellow,
+    textTitle = colors.cyan,
+    textHighlight = colors.orange,
+    textNormal = colors.white
+}
+
+-- Game state
+local currentPlayer = nil
+local currentBet = MIN_BET
+
+-- Helper Functions
+local function getPlayerBalance(playerName)
+    local response = http.get(API_URL .. playerName)
+    if response then
+        local data = response.readAll()
+        response.close()
+        local result = textutils.unserializeJSON(data)
+        return result and result.coins or 0
+    end
+    return 0
+end
+
+local function updatePlayerBalance(playerName, newBalance)
+    local body = textutils.serializeJSON({ coins = newBalance })
+    http.post(API_URL .. playerName, body, { ["Content-Type"] = "application/json" })
+end
+
+local function displayCenteredMenuText(lines)
+    local width, height = monitor.getSize()
+    local centerX = math.floor(width / 2)
+    local centerY = math.floor(height / 2)
+
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
+    monitor.setTextColor(colors.white)
+ 
+    for i, line in ipairs(lines) do
+        monitor.setCursorPos(centerX - math.floor(string.len(line) / 2), centerY - #lines / 2 + i - 1)
+        monitor.write(line)
+    end
+end
+
+local function printCentered(y, text, color)
+    local width, _ = monitor.getSize()
+    local x = math.floor((width - #text) / 2)
+    monitor.setCursorPos(x, y)
+    monitor.setTextColor(color or COLORS.textNormal)
+    monitor.write(text)
+    monitor.setTextColor(COLORS.textNormal) -- Reset color
+end
+
+local function drawSquare(x, y, color)
+    for i = 0, squareSize - 1 do
+        for j = 0, squareSize - 1 do
+            monitor.setCursorPos(x + j, y + i)
+            monitor.setBackgroundColor(color)
+            monitor.write(" ")
+        end
+    end
+    monitor.setBackgroundColor(colors.black) -- Reset
+end
+
+local function drawSquares(filledSquares, losingSquare)
+    monitor.clear()
+    printCentered(2, "--- DOUBLE OR CASHOUT ---", COLORS.textTitle)
+    printCentered(4, "Bet: " .. currentBet .. " Coins", COLORS.textHighlight)
+    printCentered(5, "Coins: " .. getPlayerBalance(currentPlayer), COLORS.textHighlight)
+    printCentered(6, "Win and cash out,")
+    printCentered(7, "or keep going for bigger multipliers!")
+
+    for i = 1, #multipliers do
+        local x = 2 + (i - 1) * (squareSize + squareSpacing)
+        local y = 9
+
+        if losingSquare and i == losingSquare then
+            drawSquare(x, y, COLORS.losing) -- Red for loss
+        elseif i <= filledSquares then
+            drawSquare(x, y, COLORS.filled) -- Green for win
+        else
+            drawSquare(x, y, COLORS.empty) -- Gray for empty
+        end
+    end
+end
+
+local function animateSquare(x, y, duration)
+    local endTime = os.clock() + duration
+    while os.clock() < endTime do
+        drawSquare(x, y, COLORS.blinking)
+        speaker.playSound("minecraft:block.note_block.pling")
+        sleep(0.2)
+        drawSquare(x, y, COLORS.empty)
+        sleep(0.2)
+    end
+end
+
+local function playSquare(currentSquare)
+    local x = 2 + (currentSquare - 1) * (squareSize + squareSpacing)
+    local y = 9
+ 
+    animateSquare(x, y, 2)
+
+    printCentered(15, "Attempting Square " .. currentSquare .. " (" .. multipliers[currentSquare] .. "x)...", COLORS.textHighlight)
+    sleep(1)
+
+    if math.random(1, 100) <= RISK_CHANCE then
+        printCentered(17, "Square " .. currentSquare .. " Won!", COLORS.textTitle)
+        speaker.playSound("minecraft:block.note_block.harp")
+        return true
+    else
+        printCentered(17, "You Lost!", COLORS.losing)
+        speaker.playSound("minecraft:block.note_block.bass")
+        drawSquare(x, y, COLORS.losing) -- Turn square red on loss
+        sleep(WIN_DELAY)
+        return false
+    end
+end
+
+local function splitMonitor(monitor, leftText, rightText)
+    local width, height = monitor.getSize()
+    local midX = math.floor(width / 2)
+
+    monitor.clear()
+ 
+    for y = 1, height do
+        monitor.setCursorPos(midX, y)
+        monitor.write("|")
+    end
+ 
+    monitor.setCursorPos(2, math.floor(height / 2)) -- Left side
+    monitor.write(leftText)
+    monitor.setCursorPos(midX + 2, math.floor(height / 2)) -- Right side
+    monitor.write(rightText)
+end
+ 
+local function renderMonitors(state)
+    if state == "welcome" then 
+        actionMonitor.clear() -- Clear Exit/Play text
+        bidMonitor.clear() -- Clear Higher/Lower text
+    elseif state == "betting" then 
+        splitMonitor(actionMonitor, "Exit", "Play")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    elseif state == "game" then  
+        splitMonitor(actionMonitor, "Cashout", "Double")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    end
+end
+ 
+local function waitForMonitorClick(gameStarted)
+    while true do
+        local event, side, x, y = os.pullEvent("monitor_touch") 
+ 
+        if side == peripheral.getName(actionMonitor) then
+            local width, height = actionMonitor.getSize()
+            local midX = math.floor(width / 2)
+            if x <= midX then
+                return gameStarted and "cashout" or "exit"
+            else
+                return gameStarted and "double" or "play"
+            end
+ 
+        elseif side == peripheral.getName(bidMonitor) then
+            local width, height = bidMonitor.getSize()
+            local midX = math.floor(width / 2) 
+            if x <= midX then 
+                return "higherBid"
+            else 
+                return "lowerBid"
+            end
+        end
+    end
+end
+ 
+local function playDoubleOrCashout()
+    local filledSquares = 0
+    local winnings = currentBet
+
+    while filledSquares < #multipliers do
+        drawSquares(filledSquares)
+
+        local won = playSquare(filledSquares + 1)
+        if won then
+            filledSquares = filledSquares + 1
+            winnings = currentBet * (2 ^ filledSquares)
+
+            drawSquares(filledSquares)
+ 
+            printCentered(18, "Winnings: " .. winnings .. " coins", COLORS.textHighlight)
+            printCentered(19, "Double or Cash Out?")
+            while true do
+                local action = waitForMonitorClick(true)
+                if action == "cashout" then
+                    printCentered(20, "You cashed out with " .. winnings .. " coins!", COLORS.textTitle)
+                    updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) + winnings)
+                    return
+                elseif action == "double" then
+                    break
+                end
+            end
+        else
+            printCentered(20, "You lost everything!", COLORS.losing)
+            sleep(WIN_DELAY)
+            return
+        end
+    end
+ 
+    printCentered(20, "JACKPOT! Total Winnings: " .. winnings .. " coins!", COLORS.textTitle)
+    updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) + winnings)
+end
+
+local function canPlayerPlay(playerName, betAmount)
+    local balance = getPlayerBalance(playerName)
+    if balance < betAmount then
+        return false, "Insufficient balance! You need at least " .. betAmount .. " coins to play."
+    end
+    return true
+end
+
+ 
+while true do
+    renderMonitors("welcome") - 
+ 
+    monitor.clear()
+    displayCenteredMenuText({
+        "Welcome to Double Up!",
+        "Right-click the Green Block to login."
+    }) 
+ 
+    local _, username = os.pullEvent("playerClick")
+    currentPlayer = username
+    local playerBalance = getPlayerBalance(username)
+ 
+    renderMonitors("betting") -- Show Higher/Lower buttons
+    speaker.playSound("minecraft:block.note_block.bell")
+
+    while true do
+        monitor.clear()
+        monitor.setCursorPos(1, 1)
+        displayCenteredMenuText({
+            "Player: " .. currentPlayer,
+            "Balance: " .. playerBalance .. " coins", 
+            "Current Bet: " .. currentBet .. " coins",
+            "",
+            "Use Higher/Lower to adjust bet.",
+            "Press Play to start or Exit to quit."
+        })  
+        printCentered(3, "Player: " .. currentPlayer, COLORS.textHighlight)
+        printCentered(4, "Balance: " .. playerBalance .. " coins", COLORS.textHighlight)
+        printCentered(5, "Current Bet: " .. currentBet .. " coins", COLORS.textNormal)
+        printCentered(7, "Use Higher/Lower to adjust bet.")
+        printCentered(8, "Press Play to start or Exit to quit.") ]]
+ 
+        local action = waitForMonitorClick(false)
+        if action == "higherBid" then 
+            speaker.playSound("minecraft:block.note_block.snare")
+            currentBet = math.min(currentBet + BET_INCREMENT, MAX_BET)
+        elseif action == "lowerBid" then 
+            speaker.playSound("minecraft:block.note_block.snare")
+            currentBet = math.max(currentBet - BET_INCREMENT, MIN_BET)
+        elseif action == "play" then 
+            local canPlay, errorMessage = canPlayerPlay(currentPlayer, currentBet)
+            if not canPlay then 
+                displayCenteredMenuText({
+                    errorMessage,
+                    "",
+                    "Adjust your bet or exit to the main menu."
+                })
+                speaker.playSound("minecraft:block.note_block.bass")
+                sleep(2) -- Pause to let the player read the message
+            else 
+                renderMonitors("game") -- Switch to gameplay view
+                updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) - currentBet)
+                playDoubleOrCashout()
+                playerBalance = getPlayerBalance(currentPlayer) -- Refresh balance
+        
+                renderMonitors("betting")
+            end
+        
+        elseif action == "exit" then 
+            break
+        end
+    end
+end

@@ -123,6 +123,65 @@ The following settings can be adjusted in the scripts:
 
 ---
 
+### Hardware Setup
+
+Important: Right-click the modems on the barrels to activate the connection.
+
+## Coin Machine
+
+# Front View
+
+![slot machine front image](coin_machine_1.png)
+
+**Components:**
+
+- Big monitor (5x3 size).
+- Player Detector.
+- Two barrels for input and output.
+
+# Back View
+
+![slot machine back image](coin_machine_2.png)
+
+**Components:**
+
+- Big monitor connected via a network cable to a wired modem.
+- Barrels connected with a wired modem block.
+
+# Storage Setup
+
+![slot machine storage image](coin_machine_3.png)
+
+**Components:**
+
+- Network cable connected to a wired modem block.
+- Storage drawers around the modem block for item storage.
+
+## Game Machines (Blackjack, Slot Machine, Double Up)
+
+# Front View 
+
+![game machine back image](game_machine_1.png)
+
+**Components:**
+
+- Big monitor (5x3 size).
+- Player Detector.
+- Two small monitors (2x1) for actions (e.g., Hit/Stand, Higher/Lower).
+
+# Back View
+
+![game machine back image](game_machine_2.png)
+
+**Components:**
+
+- Big monitor connected via a wired modem and network cable.
+- Player Detector connected with a wired modem and network cable.
+- Two small monitors connected with wired modems and network cables.
+- Speaker placed to the left of the computer for sound effects.
+
+---
+
 ## How to Play
 
 ### General Steps

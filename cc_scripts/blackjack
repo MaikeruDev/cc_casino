@@ -1,0 +1,390 @@
+sleep(2)
+
+-- Peripheral Setup / Make sure to adjust your peripheral names
+local monitor = peripheral.wrap("monitor_10") -- Main game monitor
+local actionMonitor = peripheral.wrap("monitor_11") -- Stand/Hit monitor
+local bidMonitor = peripheral.wrap("monitor_14") -- Higher/Lower Bid monitor
+local playerDetector = peripheral.find("playerDetector") -- Player Detector peripheral
+local speaker = peripheral.wrap("left") -- Speaker for sound effects
+
+-- API URL
+local API_URL = "http://<API_IP>:3000/balance/"
+
+-- Constants
+local BLACKJACK_MULTIPLIER = 1.5
+local WIN_DELAY = 3 -- Delay before displaying the result in seconds
+local BET_INCREMENT = 5 -- Bet increment
+local MAX_BET = 500 -- Maximum bet allowed
+
+-- Game State
+local currentBet = 5
+local currentPlayer = nil
+
+-- Split Monitor Rendering
+local function splitMonitor(monitor, leftText, rightText)
+    local width, height = monitor.getSize()
+    local midX = math.floor(width / 2)
+
+    monitor.clear()
+ 
+    for y = 1, height do
+        monitor.setCursorPos(midX, y)
+        monitor.write("|")
+    end
+ 
+    monitor.setCursorPos(2, math.floor(height / 2)) -- Left side
+    monitor.write(leftText)
+    monitor.setCursorPos(midX + 2, math.floor(height / 2)) -- Right side
+    monitor.write(rightText)
+end
+
+-- Render Monitors with Dynamic Button Texts
+local function renderMonitors(state)
+    if state == "welcome" then
+        -- Welcome screen: Display "Exit" and "Play", clear bid monitor 
+        actionMonitor.clear() -- Clear Exit/Play text
+        bidMonitor.clear() -- Clear Higher/Lower text
+    elseif state == "betting" then
+        -- Betting screen: Display "Exit" and "Play", and allow Higher/Lower
+        splitMonitor(actionMonitor, "Exit", "Play")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    elseif state == "game" then
+        -- Gameplay: Display "Stand" and "Hit", and allow Higher/Lower
+        splitMonitor(actionMonitor, "Stand", "Hit")
+        splitMonitor(bidMonitor, "Higher", "Lower")
+    end
+end
+
+-- API Helper Functions
+local function getPlayerBalance(playerName)
+    local response = http.get(API_URL .. playerName)
+    if response then
+        local data = response.readAll()
+        response.close()
+        local result = textutils.unserializeJSON(data)
+        return result and result.coins or 0
+    end
+    return 0
+end
+
+local function updatePlayerBalance(playerName, newBalance)
+    local body = textutils.serializeJSON({ coins = newBalance })
+    http.post(API_URL .. playerName, body, { ["Content-Type"] = "application/json" })
+end
+
+-- Input Handler for Split Monitors
+local function waitForMonitorClick(gameStarted)
+    while true do
+        local event, side, x, y = os.pullEvent("monitor_touch") 
+
+        -- Action Monitor (Monitor 11: Exit/Play or Stand/Hit)
+        if side == peripheral.getName(actionMonitor) then
+            local width, height = actionMonitor.getSize()
+            local midX = math.floor(width / 2)
+            if x <= midX then
+                return gameStarted and "stand" or "exit"
+            else
+                return gameStarted and "hit" or "play"
+            end
+
+        -- Bid Monitor (Monitor 14: Higher/Lower)
+        elseif side == peripheral.getName(bidMonitor) then
+            local width, height = bidMonitor.getSize()
+            local midX = math.floor(width / 2) 
+            if x <= midX then 
+                return "higherBid"
+            else 
+                return "lowerBid"
+            end
+        end
+    end
+end
+
+-- Helper Functions
+local function calculateHandValue(hand)
+    local value, aces = 0, 0
+    for _, card in ipairs(hand) do
+        if tonumber(card) then
+            value = value + tonumber(card)
+        elseif card == "A" then
+            value, aces = value + 11, aces + 1
+        else
+            value = value + 10
+        end
+    end
+    while value > 21 and aces > 0 do
+        value, aces = value - 10, aces - 1
+    end
+    return value
+end
+
+local function drawCard(monitor, x, y, cardValue)
+    local cardArt
+    if cardValue == "10" then
+        cardArt = {
+            " _____ ",
+            "|10   |",
+            "|     |",
+            "|  10 |",
+            "|     |",
+            "|___10|"
+        }
+    else
+        cardArt = {
+            " _____ ",
+            "|%s    |",
+            "|     |",
+            "|  %s  |",
+            "|     |",
+            "|____%s|"
+        }
+    end
+    
+    local displayValue = cardValue == "10" and "10" or string.sub(cardValue, 1, 1)
+    local middle = " " .. (cardValue == "A" and "^" or " ") .. " "
+    for i, line in ipairs(cardArt) do
+        monitor.setCursorPos(x, y + i - 1)
+        monitor.write(line:format(displayValue, middle, displayValue))
+    end
+end
+
+
+local function displayGame(playerHand, dealerHand, betAmount, showAllDealerCards)
+    local width, height = monitor.getSize()
+    local centerX = math.floor(width / 2)
+    local centerY = math.floor(height / 2)
+    
+    -- Set green background for gameplay
+    monitor.setBackgroundColor(colors.green)
+    monitor.clear()
+    monitor.setTextColor(colors.white)
+
+    -- Display the bet amount at the top center
+    local betText = "Bet: " .. betAmount .. " Coins"
+    monitor.setCursorPos(centerX - math.floor(string.len(betText) / 2), 1)
+    monitor.write(betText)
+
+    -- Calculate hand values
+    local playerHandValue = calculateHandValue(playerHand)
+    local dealerHandValue = calculateHandValue(dealerHand)
+
+    -- Calculate dynamic card positions
+    local cardWidth = 8
+    local maxCards = math.min(#playerHand, 5) -- Adjust spacing for more cards
+    local playerStartX = centerX - (math.ceil(maxCards / 2) * cardWidth) + 4
+    local playerY = centerY - 6
+
+    -- Display Player's Hand with Value
+    local playerHandText = "Your Hand (" .. playerHandValue .. "):"
+    monitor.setCursorPos(centerX - math.floor(string.len(playerHandText) / 2), playerY - 1)
+    monitor.write(playerHandText)
+    for i, card in ipairs(playerHand) do
+        drawCard(monitor, playerStartX + (i - 1) * cardWidth, playerY, card)
+    end
+
+    -- Calculate dealer card positions
+    local dealerStartX = centerX - (math.ceil(#dealerHand / 2) * cardWidth) + 4
+    local dealerY = playerY + 8
+
+    -- Display Dealer's Hand
+    local dealerHandText = "Dealer's Hand:"
+    monitor.setCursorPos(centerX - math.floor(string.len(dealerHandText) / 2), dealerY - 1)
+    monitor.write(dealerHandText)
+    for i, card in ipairs(dealerHand) do
+        if not showAllDealerCards and i > 1 then
+            drawCard(monitor, dealerStartX + (i - 1) * cardWidth, dealerY, "?")
+        else
+            drawCard(monitor, dealerStartX + (i - 1) * cardWidth, dealerY, card)
+        end
+    end
+
+    -- Reset background color
+    monitor.setBackgroundColor(colors.black)
+end
+
+
+-- Centered Menu Text Function
+local function displayCenteredMenuText(lines)
+    local width, height = monitor.getSize()
+    local centerX = math.floor(width / 2)
+    local centerY = math.floor(height / 2)
+
+    monitor.setBackgroundColor(colors.black)
+    monitor.clear()
+    monitor.setTextColor(colors.white)
+
+    -- Center each line of text
+    for i, line in ipairs(lines) do
+        monitor.setCursorPos(centerX - math.floor(string.len(line) / 2), centerY - #lines / 2 + i - 1)
+        monitor.write(line)
+    end
+end
+
+
+-- Game Logic
+local function playBlackjack()
+    speaker.playSound("minecraft:block.note_block.harp")
+
+    -- Create a deck
+    local values = {"2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"}
+    local function drawCardValue() return values[math.random(1, #values)] end
+
+    local playerHand, dealerHand = {drawCardValue(), drawCardValue()}, {drawCardValue(), drawCardValue()}
+    local playerBlackjack = false
+    local dealerBlackjack = false
+
+    -- Check if the player starts with Blackjack 
+    if calculateHandValue(playerHand) == 21 and #playerHand == 2 then
+        playerBlackjack = true
+        displayGame(playerHand, dealerHand, currentBet, false) -- Draw the player and dealer cards first
+        monitor.setCursorPos(1, 12)
+        monitor.write("Blackjack! You Win!")
+        
+        -- Play the ding-ding sound effect AFTER the image is drawn
+        for _ = 1, 10 do
+            speaker.playSound("minecraft:block.note_block.bell")
+            sleep(0.2) -- Short pause between dings
+        end
+    end
+
+
+    -- Check if the dealer starts with Blackjack
+    if calculateHandValue(dealerHand) == 21 and #dealerHand == 2 then
+        dealerBlackjack = true
+    end
+
+    -- End the game immediately if either the player or dealer has Blackjack
+    if playerBlackjack or dealerBlackjack then
+        displayGame(playerHand, dealerHand, currentBet, true) -- Show all cards
+        monitor.setCursorPos(1, 12)
+        if playerBlackjack and dealerBlackjack then
+            speaker.playSound("minecraft:block.note_block.bass")
+            monitor.write("Push! Both have Blackjack!")
+        elseif dealerBlackjack then
+            speaker.playSound("minecraft:block.note_block.banjo")
+            monitor.write("Dealer Wins! Blackjack!")
+            updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) - currentBet)
+        elseif playerBlackjack then
+            speaker.playSound("minecraft:block.note_block.chime")
+            monitor.write("Blackjack! You Win!")
+            updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) + math.ceil(currentBet * BLACKJACK_MULTIPLIER))
+        end
+        sleep(WIN_DELAY)
+        return
+    end
+
+    -- Player's turn
+    while calculateHandValue(playerHand) <= 21 do
+        displayGame(playerHand, dealerHand, currentBet, false)
+        local action = waitForMonitorClick(true) -- Pass `true` for gameStarted
+        if action == "hit" then
+            speaker.playSound("minecraft:block.note_block.pling")
+            table.insert(playerHand, drawCardValue())
+        elseif action == "stand" then
+            speaker.playSound("minecraft:block.note_block.bass")
+            break
+        end
+    end
+
+    -- Dealers turn
+    while calculateHandValue(dealerHand) < 17 do
+        table.insert(dealerHand, drawCardValue())
+    end
+
+    -- Reveal all cards and determine winner
+    local playerValue, dealerValue = calculateHandValue(playerHand), calculateHandValue(dealerHand)
+    displayGame(playerHand, dealerHand, currentBet, true)
+
+    if playerValue > 21 or (dealerValue <= 21 and dealerValue > playerValue) then
+        speaker.playSound("minecraft:block.note_block.banjo")
+        monitor.setCursorPos(1, 12)
+        monitor.write("Dealer Wins!")
+        updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) - currentBet)
+    elseif dealerValue > 21 or playerValue > dealerValue then
+        speaker.playSound("minecraft:block.note_block.xylophone")
+        monitor.setCursorPos(1, 12)
+        monitor.write("You Win!")
+        updatePlayerBalance(currentPlayer, getPlayerBalance(currentPlayer) + currentBet)
+    else
+        speaker.playSound("minecraft:block.note_block.bass")
+        monitor.setCursorPos(1, 12)
+        monitor.write("Push! It's a tie.")
+    end
+    sleep(WIN_DELAY)
+end
+ 
+-- Game Logic
+local function canPlayerPlay(playerName, betAmount)
+    local balance = getPlayerBalance(playerName)
+    if balance < betAmount then
+        return false, "Insufficient balance! You need at least " .. betAmount .. " Coins to play."
+    end
+    return true
+end
+
+-- Main Loop
+while true do
+    renderMonitors("welcome") -- Render Welcome Screen
+
+    -- Display homescreen
+    monitor.clear()
+    monitor.setCursorPos(1, 1) 
+    displayCenteredMenuText({
+        "Welcome to Blackjack!",
+        "Right-click the Green Block to login."
+    }) 
+    
+    -- Wait for player to register
+    local _, username = os.pullEvent("playerClick")
+    currentPlayer = username
+    local playerBalance = getPlayerBalance(username)
+
+    -- Betting screen
+    renderMonitors("betting") -- Show Higher/Lower buttons
+    speaker.playSound("minecraft:block.note_block.bell")
+
+    while true do
+        -- Refresh homescreen
+        monitor.clear()
+        monitor.setCursorPos(1, 1)
+        displayCenteredMenuText({
+            "Player: " .. username,
+            "Balance: " .. playerBalance .. " Coins",
+            "Current Bet: " .. currentBet .. " Coins",
+            "",
+            "Use Higher/Lower to adjust bet.",
+            "Press Play to start or Exit to quit."
+        }) 
+
+        local action = waitForMonitorClick(false)
+
+        if action == "higherBid" then
+            speaker.playSound("minecraft:block.note_block.snare")
+            currentBet = math.min(currentBet + BET_INCREMENT, MAX_BET)
+        elseif action == "lowerBid" then
+            speaker.playSound("minecraft:block.note_block.bass")
+            currentBet = math.max(currentBet - BET_INCREMENT, BET_INCREMENT)
+        elseif action == "play" then
+            -- Check if the player can play
+            local canPlay, errorMessage = canPlayerPlay(username, currentBet)
+            if not canPlay then
+                -- Show error message
+                displayCenteredMenuText({
+                    errorMessage,
+                    "",
+                    "Adjust your bet or exit to the main menu."
+                })
+                speaker.playSound("minecraft:block.note_block.bass")
+                sleep(2) -- Allow the player to read the message
+            else
+                renderMonitors("game") -- Switch to gameplay screen
+                playBlackjack()
+                playerBalance = getPlayerBalance(username)
+                renderMonitors("betting") -- Return to betting after round
+            end
+        elseif action == "exit" then
+            speaker.playSound("minecraft:block.note_block.bass")
+            break -- Exit to main menu
+        end
+    end
+end

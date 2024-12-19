@@ -1,12 +1,12 @@
 sleep(1)
 
 local monitor = peripheral.find("monitor")
-local chest = peripheral.wrap("sophisticatedstorage:barrel_5") //Define your Chest name here for the input/deposit chest
-local output = peripheral.wrap("sophisticatedstorage:barrel_2") //Define your Chest name here for outputting/cashout items
+local chest = peripheral.wrap("sophisticatedstorage:barrel_5") --Define your Chest name here for the input/deposit chest
+local output = peripheral.wrap("sophisticatedstorage:barrel_2") --Define your Chest name here for outputting/cashout items
 
 local apiUrl = "http://<API_IP>:3000/balance/"
 
-local validItems = { //Define your items that are going to be tradable and their chests
+local validItems = { --Define your items that are going to be tradable and their chests
     ["minecraft:emerald"] = { name = "Emerald", value = 10, color = "lime", storage = "functionalstorage:spruce_1_2" },
     ["minecraft:diamond"] = { name = "Diamond", value = 5, color = "blue", storage = "functionalstorage:spruce_1_3" },
     ["minecraft:netherite_ingot"] = { name = "Netherite", value = 20, color = "purple", storage = "functionalstorage:spruce_1_7" },
